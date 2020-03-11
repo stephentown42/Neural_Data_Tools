@@ -13,7 +13,8 @@ function matched_times = align_event_times(file_path, draw)
 % - draw (optional): shows alignment of times for visual inspection
 %
 % OUTPUTS:
-% - 
+% - matched_times: array of stimulus times where time is defined by the
+% multichannel systems clock
 
 try
            

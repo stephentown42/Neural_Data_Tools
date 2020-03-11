@@ -23,7 +23,12 @@ try
                   'times',  false,...
                   'psth',   true,...
                   'fra',    true);
-    
+              
+    % Define bin widths
+    bin_width = 0.01;
+    psth_bins = -0.1 : bin_width : 0.2;
+    resp_bins = -0.1 : 0.1 : 0.1;        
+                  
     % List files
     h5_files = dir( fullfile( block_path, '*.h5'));
     txt_file = dir( fullfile( block_path, '*.txt'));
@@ -36,6 +41,8 @@ try
     else
         error('Multiple metadata files detected')
     end
+    
+    matched_times = align_event_times(block_path, true);    
     
     [freqs, levels] = meshgrid( unique(stim.Frequency), unique(stim.dB_SPL));
     
@@ -52,21 +59,29 @@ try
         if draw.psth
 
             figureST( ['PSTH: ' neural_file]);
-            sp = dealSubplots(4, nChans/4);
-
-            bin_width = 0.01;
-            psth_bins = -0.1 : bin_width : 0.2;
-
+            sp = dealSubplots(4, nChans/4);       
+            
+            good_chans = nan( nChans, 1);
+            
             for chan = 1 : nChans                                                            
 
-                taso = bsxfun(@minus, spike_times{chan}, stim.StartTime);
-                nhist = histc( transpose(taso), psth_bins);
+                taso = bsxfun(@minus, spike_times{chan}, matched_times(:));
+                taso = transpose(taso);                                
+                
+                nhist = histc( taso, psth_bins);
                 nhist = nhist ./ bin_width;
-
+                
+                good_chans(chan) = is_responsive( taso, resp_bins);
+                if good_chans(chan) == 1
+                    color = 'k';
+                else
+                    color = grey;
+                end
+                
                 chan_idx = chan_map.MCS_Chan == chan;
                 axes( sp( chan_map.Subplot_idx( chan_idx)))
 
-                plotSE_patch( psth_bins, nhist', 'x', gca, 'k');
+                plotSE_patch( psth_bins, nhist', 'x', gca, color);
 
                 xlabel('Time (s)')
                 ylabel('Firing Rate (Hz)')        
@@ -110,9 +125,13 @@ try
                 title(sprintf('E%02d', warp_chan))
 
                 axis tight
+                
+                if good_chans(chan) == 1
+                    colormap(gca,magma);
+                else
+                    colormap(gca,'gray');
+                end
             end
-        
-        colormap(magma)
         end
     end
 
@@ -122,4 +141,11 @@ catch err
     keyboard
 end
 
+
+function is_good = is_responsive( taso, resp_bins)
+
+% Get difference in number of spikes before and after tone
+nhist = histc( taso, resp_bins);
+x = diff(nhist(1:2,:));
+is_good = ttest(x);
 
