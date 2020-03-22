@@ -18,6 +18,14 @@ function varargout = show_me_the_spikes( pathname, filename, options)
 % Created on 13 March 2019 by Stephen Town
 % Updated on 13 Dec 2019
 %
+% INPUT:
+%   - pathname: file path containing h5 files
+%   - filename: h5 file name
+%   - options: struct with following fields...
+%               - time limit over when to load spikes from
+%               - cleaning: whether (and how) to clean
+%               = sample rate of headstage (usually 20kHz)
+%
 % Enable library
 % addpath('C:\Users\Dumbo\Documents\MATLAB\Optional Toolboxes\McsMatlabDataTools')
 
