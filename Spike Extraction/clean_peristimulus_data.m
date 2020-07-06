@@ -1,4 +1,4 @@
-function data = clean_peristimulus_data(data, trigTime, windowTime, fS)
+function output_data = clean_peristimulus_data(data, trigTime, windowTime, fS)
 %
 % data - matrix of ephys data (rows = channels, columns = samples)
 % windowLen - time window in seconds for cleaning (default = 5)
@@ -10,7 +10,7 @@ function data = clean_peristimulus_data(data, trigTime, windowTime, fS)
 % in order to save time analysing 
 %
 % Stephen Town: 25th Feb 2020
-
+%   Updated: 5th July 2020 - return nans for uncleaned samples
 try
 
 % Default arguments
@@ -30,30 +30,30 @@ end
 data( isnan( data)) = 0;
 data( isinf( data)) = 0;
 [nChan, nSamp] = size(data);
+output_data = nan( nChan, nSamp);
 
 % Compute sample windows
 window_samps = ceil( windowTime * fS);
-window_idx = 1 : window_samps;
-window_idx = window_idx - floor( window_samps / 2);
 
-start_times = trigTime - windowTime / 2;
+start_times = trigTime - (windowTime / 2);
 start_times(start_times <= 0) = [];
+start_times( isnan(start_times)) = [];
 start_samp = round( start_times * fS);
 
-idx = bsxfun(@plus, start_samp(:), window_idx);
+idx = bsxfun(@plus, start_samp(:), 1:window_samps);
 
 % Remove negative values
 idx( any(idx < 1, 2), :) = [];
 idx( any(idx > nSamp, 2), :) = [];
 
 % t_start = tic;
-h = waitbar(0);
+h = waitbar(0, 'Cleaning data...');
 
-% For each 
-for i = 1 : size(idx, 1)
+% For each stimulus
+for i = 1 : numel(start_samp)
     
     % Report progress
-    waitbar( 100 * (i / numel(trigTime)), h)
+    waitbar( i / numel(trigTime), h)
     
     % Clean data           
     data_to_clean = data(:, idx(i,:));
@@ -61,7 +61,7 @@ for i = 1 : size(idx, 1)
     if any( isnan( data_to_clean(:))), continue; end
     
     cleaned_data = CleanData( data_to_clean, 0);
-    data(:, idx(i,:)) = transpose( cleaned_data(:, 1:nChan));            
+    output_data(:, idx(i,:)) = transpose( cleaned_data(:, 1:nChan));            
 end
 
 % fprintf('Cleaning complete: %.3f seconds\n', toc(t_start))

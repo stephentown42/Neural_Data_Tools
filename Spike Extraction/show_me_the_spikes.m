@@ -1,4 +1,4 @@
-function varargout = show_me_the_spikes( pathname, filename, options)
+function varargout = show_me_the_spikes( h5_path, options)
 %
 % This script is hijacked from the frontiers project to do quick spike 
 % extraction. It doesn't clean, it does't check for errors or any
@@ -19,8 +19,7 @@ function varargout = show_me_the_spikes( pathname, filename, options)
 % Updated on 13 Dec 2019
 %
 % INPUT:
-%   - pathname: file path containing h5 files
-%   - filename: h5 file name
+%   - h5_path: path to h5 file
 %   - options: struct with following fields...
 %               - time limit over when to load spikes from
 %               - cleaning: whether (and how) to clean
@@ -34,17 +33,24 @@ try
     % Request file by user
     if nargin == 0
         [filename, pathname] = uigetfile('*.h5');
+        h5_path = fullfile( pathname, filename);
+    else
+        [~, filename] = fileparts( h5_path);
     end
     
-    if nargin < 3
-        options = struct('tlim', [0 inf],...
-                         'cleaning', 'none',...
-                         'fS', 2e4);
-        options.draw = struct('waveform', true,...
-                               'times', true);
-                           
+    % Default options
+    if ~isfield( options, 'fS'), options.fS = 2e4; end
+    if ~isfield( options, 'tlim'), options.tlim = [0 inf]; end
+    if ~isfield( options, 'cleaning'), options.cleaning = 'none'; end    
+    if ~isfield( options, 'draw')        
+       options.draw = struct('waveform', true,'times', true);
+    end    
+    if ~isfield( options, 'threshold')                          
+       options.threshold = struct('metric', 'std',...       % or 'voltage'
+                                  'method', 'universal',... % or 'byChan'
+                                  'limits', [-3.5 -8]);     % or n x 2 array of channel specific values
     end
-   
+           
     % Get channel mapping
     chan_map_dir = 'C:\Users\steph\Documents';
     chan_map_file = 'Warp_to_WirelessHeadstage_ChanMap.txt';
@@ -52,43 +58,39 @@ try
     chan_map = readtable( chan_map_path, 'delimiter','\t'); 
     
     % Load data 
-    H5 = McsHDF5.McsData( fullfile( pathname, filename) );
-    
-    % Find index for filtered neural data
-    h5_idx = 0;
-    h5_ok  = false;
-    
-    while ~h5_ok && h5_idx < numel(H5.Recording{1}.AnalogStream)
-        h5_idx    = h5_idx + 1;
-        testLabel = H5.Recording{1}.AnalogStream{h5_idx}.Label;
-        h5_ok     = contains(testLabel,'Filter Data1');
-    end
-    
-    % Load the data
-    fltData = H5.Recording{1}.AnalogStream{h5_idx}.ChannelData;
+    H5 = McsHDF5.McsData( h5_path);
+        
+    fltData = load_neural_data(H5, 'Filter Data1');    
     [nChans, nSamps] = size(fltData);           
 
     % Remove the first 3 seconds of recording and crop to max time of 
     % behavioural testing (speeds up code and avoids starting artefacts)             
-    offset_time = max([3 options.tlim(1)]);
-    offset_samps = round(offset_time * options.fS);       
-    end_samps = min([ceil(options.tlim(2) * options.fS) nSamps]);   
-    fltData = fltData(:, offset_samps: end_samps);
+%     start_time = max([3 options.tlim(1)]);
+%     start_samps = round(start_time * options.fS);       
+%     end_samps = min([ceil(options.tlim(2) * options.fS) nSamps]);   
+%     fltData = fltData(:, start_samps: end_samps);
     
+    start_time = 0;
+
     % Clean data
     fltData = detect_disconnections( fltData);
     
-    if strcmp(options.cleaning,'peristimulus')
+    if strcmp(options.cleaning,'peristimulus')        
         
-        trigger_times = options.stimTimes - offset_time;
+        trigger_times = options.stimTimes - start_time;
         fltData = clean_peristimulus_data(fltData, trigger_times);
+        
     elseif strcmp(options.cleaning,'roving')
         fltData = clean_data_in_roving_window(fltData);
     end
     
+    % Get diagnostics on signal quality
+    summary_stats = get_summary_stats( fltData');
+    
     % Preassign
     [spike_times, wv] = deal( cell( nChans, 1));
     nSpikes = zeros(nChans, 1);
+    
     h = waitbar(0, 'Spike extraction');
     
     % For each channel
@@ -96,9 +98,11 @@ try
                             
         waitbar(chan/nChans, h)
         
-        [spike_samps, wv{chan}] = getSpikeTimes(fltData(chan,:));
+        options.threshold.currentChan = chan;   % Allow channel specific threshold values
         
-        spike_times{chan} = offset_time + (spike_samps ./ options.fS);
+        [spike_samps, wv{chan}] = getSpikeTimes( fltData(chan,:), options.threshold);
+        
+        spike_times{chan} = start_time + (spike_samps ./ options.fS);
   
         nSpikes(chan) = numel(spike_samps);
     end      
@@ -154,6 +158,7 @@ try
         varargout{1} = spike_times;
         varargout{2} = chan_map;
         varargout{3} = wv;
+        varargout{4} = summary_stats;
     end
     
            
@@ -163,15 +168,36 @@ catch err
 end
 
 
+function data = load_neural_data(H5, str)
+%    
+% Find index for filtered neural data within H5 file structure and load
+ 
+h5_idx = 0;
+h5_ok  = false;
 
-function [t, wv] = getSpikeTimes(x)
+while ~h5_ok && h5_idx < numel(H5.Recording{1}.AnalogStream)
+    h5_idx    = h5_idx + 1;
+    testLabel = H5.Recording{1}.AnalogStream{h5_idx}.Label;
+    h5_ok     = contains(testLabel, str);
+end
+
+if h5_ok
+    data = H5.Recording{1}.AnalogStream{h5_idx}.ChannelData;
+else
+    data = [];
+    warning('Could not find requested stream')
+end
+
+
+
+function [t, wv] = getSpikeTimes(x, opt)
 
 % This is taken from getMClustEvents_AlignedInterpolated with the threshold
 % parameters adjusted for the different electrodes.
 %
-% x = filtered voltage trace from which to extract spikes
-% b = regression coefficients describing offset and sampling rate
-% difference between devices
+% INPUTS
+%   - x: filtered voltage trace from which to extract spikes
+%   - opt: threshold options
 
 % Parameters
 wInt = 1;
@@ -191,8 +217,28 @@ alignmentZero = find(window == 0);
 if iscolumn(x), x = transpose(x); end
 
 % Get upper (ub) and lower (lb) bounds
-lb = -3.5 * nanstd(x);
-ub = -8 * nanstd(x);
+if strcmp( opt.metric, 'std')           % Using standard deviation of signal
+    if strcmp( opt.method, 'universal')
+        lb = opt.limits(1) * nanstd(x);
+        ub = opt.limits(2) * nanstd(x);
+    
+    elseif strcmp( opt.metric, 'byChan')        
+        limits = opt.limits( opt.currentChan, :);        
+        lb = limits(1) * nanstd(x);
+        ub = limits(2) * nanstd(x);
+    end
+    
+elseif strcmp( opt.metric, 'voltage')   % Using specific values
+    if strcmp( opt.method, 'universal')
+        lb = opt.limits(1);
+        ub = opt.limits(2);
+    
+    elseif strcmp( opt.metric, 'byChan')        
+        limits = opt.limits( opt.currentChan, :);        
+        lb = limits(1);
+        ub = limits(2);
+    end    
+end
 
 % Identify thrshold crossings
 lcIdx = find(x < lb);

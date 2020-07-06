@@ -70,7 +70,8 @@ function draw_psth( file_name, spike_times, ev_times, chan_map)
 
         xlabel('Time (s)')
         ylabel('Firing Rate (Hz)')
-
+        ylim([0 max(ylim)])
+        
         warp_chan = chan_map.Warp_Chan( chan_idx);
         title(sprintf('E%02d', warp_chan))
     end
