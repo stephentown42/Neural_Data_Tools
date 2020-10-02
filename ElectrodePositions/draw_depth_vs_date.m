@@ -15,11 +15,10 @@ function eData = draw_depth_vs_date( file_path, file_name, draw)
 
 % Demoe / default args
 if nargin == 0
-    file_path = 'C:\Analysis\Electrode Positions';
-    file_name = 'F1808_Right.csv';
-    draw = true;
-    
-elseif nargin < 3
+    [file_name, file_path] = uigetfile('*.csv');    
+end
+
+if nargin < 3
     draw = true;
 end
 
@@ -90,7 +89,8 @@ if draw
 
         I = F(F.Channel == electrodes(i),:);    % Data for one electrode
 
-        h = plot( I.start_dt, I.Depth, 'Marker','.','MarkerSize',8);
+        h = plot( I.start_dt, I.Depth, 'Marker','.',...
+            'MarkerSize',8, 'DisplayName', num2str(electrodes(i)));
         c = get(h,'color');
 
         text(I.start_dt(end) + days(7), I.Depth(end), sprintf('%02d', electrodes(i)),...
