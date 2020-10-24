@@ -9,6 +9,6 @@ CSV tables for each electrode array in left and/or right hemispheres. Data from:
 <br/>
 
 ## Loading and visualization
-A starter function is included to load data and compute the duration at each recording site: **draw_depth_vs_date.m**
+A starter function is included to load data and compute the duration at each recording site: **draw_depth_vs_date.m**. More recently, the python version of this function allows use of data straight from this repository without needing to download the data to a local machine.
 
 ![F1808_Right](F1808_Right.png)
