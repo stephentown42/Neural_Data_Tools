@@ -1,5 +1,7 @@
 function get_nearest_block(file_path)
 %
+% INPUTS:
+%   - file_path
 %
 % Stephen Town: May 9th, 2020
 % - 14 June 2020 - added ability to get blocks for video files
@@ -54,7 +56,7 @@ else
     block = table2struct( block);
     
     fprintf('\tFile Date: %s found\n', datestr( block.datetime, 'ddd, dd-mmm-yyyy HH:MM:ss'));
-    fprintf('%s %s...\n', block.Ferret, block.Block)
+    fprintf('%s %s...\n', block.Ferret, block.Block)        
 end
 
 % Check for h5 files in extracted folder
@@ -70,8 +72,29 @@ h5_in_block = report_h5_files( dirs.block, file_name(1:19));
 % command line yet)
 if numel(h5_to_put) == 0 && numel(h5_in_block) == 0
     fprintf('Recommend extracting data from %s\n', file_name)
-% else
-%     keyboard
+else
+    
+    % List contents of block and ask about moving all files with same name
+    % (across extention types) to this directory
+    dirs.block = fullfile( dirs.tanks, block.Ferret, block.Block);
+    eval(sprintf('! dir %s', dirs.block))
+
+    moveQ = input('Do you want to move files to this block (y/n)?', 's');
+    
+    if strcmp(moveQ, 'y')
+        
+        files_to_move = dir( fullfile( file_path, [file_name '*']));
+                
+        for i = 1 : numel( files_to_move)    
+            src_path = fullfile( file_path, files_to_move(i).name);
+            tar_path = fullfile( dirs.block, files_to_move(i).name);
+            
+            fprintf('\nMoving %s', files_to_move(i).name)
+            fprintf('\t(%d)', movefile( src_path, tar_path));
+        end     
+        
+        fprintf('\n')
+    end
 end
 
 
