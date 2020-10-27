@@ -48,7 +48,7 @@ try
     if ~isfield( options, 'threshold')                          
        options.threshold = struct('metric', 'std',...       % or 'voltage'
                                   'method', 'universal',... % or 'byChan'
-                                  'limits', [-3.5 -8]);     % or n x 2 array of channel specific values
+                                  'limits', [-3 -8]);     % or n x 2 array of channel specific values
     end
            
     % Get channel mapping
@@ -63,6 +63,13 @@ try
     fltData = load_neural_data(H5, 'Filter Data1');    
     [nChans, nSamps] = size(fltData);           
 
+    % Apply any hard time limits
+    if ~isinf(options.tlim(2))        
+        end_samp = round(options.tlim(2) * options.fS);
+        end_samp = min([end_samp, nSamps]);     % Ensure it fits signal
+        fltData = fltData(:, 1:end_samp);        
+    end    
+    
     % Remove the first 3 seconds of recording and crop to max time of 
     % behavioural testing (speeds up code and avoids starting artefacts)             
 %     start_time = max([3 options.tlim(1)]);
@@ -86,6 +93,12 @@ try
     
     % Get diagnostics on signal quality
     summary_stats = get_summary_stats( fltData');
+    
+    % Optional: Select threshold values from alternate file
+    % (for when a block is known to give very high thresholds)
+    if strcmp(options.threshold.method, 'transplant')
+        options.threshold = import_threshold( options.threshold);
+    end
     
     % Preassign
     [spike_times, wv] = deal( cell( nChans, 1));
@@ -159,6 +172,7 @@ try
         varargout{2} = chan_map;
         varargout{3} = wv;
         varargout{4} = summary_stats;
+        varargout{5} = options;
     end
     
            
@@ -188,6 +202,25 @@ else
     warning('Could not find requested stream')
 end
 
+
+
+function S = import_threshold(S)
+%
+% INPUT:
+%   - S: struct with fields...
+%       - limits: 1x2 array containing multiples of standard deviations 
+%           used for upper and lower bounds
+%
+% Returns:
+%   - S: struct with fields...
+%       - limits: mx2 array containing threshold values for each channel 
+%                  based on standard deviation previously obtained in a 
+%                  different block
+
+[filename, pathname] = uigetfile('*.mat');
+load( fullfile( pathname, filename), 'vStats')
+
+S.limits = bsxfun(@times, vStats.StdDev, S.limits);
 
 
 function [t, wv] = getSpikeTimes(x, opt)
@@ -220,9 +253,13 @@ if iscolumn(x), x = transpose(x); end
 if strcmp( opt.metric, 'std')           % Using standard deviation of signal
     if strcmp( opt.method, 'universal')
         lb = opt.limits(1) * nanstd(x);
-        ub = opt.limits(2) * nanstd(x);
+        ub = opt.limits(2) * nanstd(x);    
     
-    elseif strcmp( opt.metric, 'byChan')        
+    elseif strcmp( opt.method, 'transplant')                
+        lb = opt.limits( opt.currentChan, 1);        
+        ub = opt.limits( opt.currentChan, 2);
+    
+    elseif strcmp( opt.method, 'byChan')        
         limits = opt.limits( opt.currentChan, :);        
         lb = limits(1) * nanstd(x);
         ub = limits(2) * nanstd(x);
@@ -233,7 +270,7 @@ elseif strcmp( opt.metric, 'voltage')   % Using specific values
         lb = opt.limits(1);
         ub = opt.limits(2);
     
-    elseif strcmp( opt.metric, 'byChan')        
+    elseif strcmp( opt.method, 'byChan')        
         limits = opt.limits( opt.currentChan, :);        
         lb = limits(1);
         ub = limits(2);
