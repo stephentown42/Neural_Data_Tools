@@ -1,7 +1,7 @@
 function draw_vStats_vs_Block
 
 % Settings
-ferret = 'F1701_Pendleton';
+ferret = 'F1905_Sponge';
 hemisphere = 'R';
 
 % Load block table for cross referencing block dates
@@ -53,7 +53,7 @@ plot_vStats( T_f, chans, colors, 'd')
 xlabel('Date')
 ylabel('Std. Dev. (uV)')
     
-keyboard
+
 
 
 

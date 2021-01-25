@@ -25,6 +25,8 @@ function draw_rasters_across_blocks( tank_dir, ferret, hemisphere, chan, depth)
 %
 % Stephen Town - Oct 2020
 
+try
+
 % Settings
 raster_bins = -0.25 : 0.001 : 0.75;             
 speaker_angles = [150 : -30 : -150, 180];
@@ -32,17 +34,17 @@ speaker_angles = [150 : -30 : -150, 180];
 % Default demo arguments
 switch nargin 
     case 0       % Demo args
-        tank_dir = 'C:\Analysis\Behavioral Recording';
-        behav_dir = 'E:\Behavior';
+        tank_dir = 'C:\Analysis\Behavioral Recording';        
         ferret = 'F1810_Ursula';        
         hemisphere = 'Right';   
-        chan = 29;       
-        depth = -2.8;     
+        chan = 6;       
+        depth = -2.6;     
 end                        
         
-% Extend path 
-tank_dir = fullfile( tank_dir, ferret); 
-behav_dir = fullfile( behav_dir, ferret);
+% Extend paths
+dirs.tank = fullfile( tank_dir, ferret); 
+dirs.behav = fullfile( 'E:\Behavior', ferret);
+dirs.electrode_pos = 'C:\Analysis\Electrode Positions\CSV\';
 
 switch hemisphere
     case 'Left'
@@ -55,11 +57,10 @@ end
 addpath( genpath( 'C:\Users\steph\Documents\MATLAB\Spike Extraction'))
 
 % Load electrode position data
-E = get_depth_vs_date( 'C:\Analysis\Electrode Positions',...
-                        [ferret(1:5) '_' hemisphere '.csv'], false);
+position_file = sprintf('Electrode moving - %s_%s.csv', ferret(1:5), hemisphere);
+E = get_depth_vs_date( dirs.electrode_pos, position_file, false, chan);
 
 E.Depth = round(E.Depth, 3);                        % Avoid precision error                    
-if ~isnan(chan), E = E(E.Channel == chan, :); end   % Filter for channel
 if ~isnan(depth), E = E(E.Depth == depth, :); end   % Filter for depth
                     
 % Load block table
@@ -82,12 +83,12 @@ for i = 1 : size(E, 1)
     for j = 1 : n_blocks
 
         % Load spike times    
-        S = load_file( tank_dir, blocks.Block{j}, file_stub);        
+        S = load_file( dirs.tank, blocks.Block{j}, file_stub);        
         
         if isempty(S), continue; end    % Skip if no date (e.g. block was an FRA)
         
         % Load behavioral file
-        B = load_behavioral_file( behav_dir, blocks.Block{j});
+        B = load_behavioral_file( dirs.behav, blocks.Block{j});
                 
         if isempty(B)
             continue
@@ -96,8 +97,9 @@ for i = 1 : size(E, 1)
         end
         
         % Correct mismatched times
+        S.matched_times( isnan(S.matched_times)) = [];        
         if size(B, 1) ~= numel(S.matched_times)
-           keyboard 
+           continue 
         end
                 
         % Map warp channel to MCS channel
@@ -141,7 +143,8 @@ for i = 1 : size(E, 1)
     end
     
     World_Speaker_Angle = speaker_angles( Speaker_Location);
-    HeadSpeakerLocation = World_Speaker_Angle(:) - CenterSpoutRotation;
+    World_Speaker_Angle = World_Speaker_Angle(:);
+    HeadSpeakerLocation = World_Speaker_Angle - CenterSpoutRotation;
     
     idx = HeadSpeakerLocation <= -180;
     HeadSpeakerLocation(idx) = HeadSpeakerLocation(idx) + 360; 
@@ -201,6 +204,14 @@ for i = 1 : size(E, 1)
     plot_rate(Response, spike_rate, rp(5), 'Response')
     
     set(rp, 'ylim', [0 max(spike_rate)])
+    
+    % Plot joint rate
+    figure
+    colormap(plasma)
+    jp = dealSubplots(1,1);    
+    plot_joint_rate(HeadSpeakerLocation, World_Speaker_Angle, spike_rate,...
+                    jp, 'Sound Angle: Head (°)', 'Sound Angle: World (°)');
+    
                
     % Show standard deviation vs date
     chan_std = cellfun(@(v) v(1), chan_std);
@@ -217,10 +228,12 @@ for i = 1 : size(E, 1)
     xlabel('Std Deviation')
     ylabel('Response Amplitude (spike count)')   
     title( sprintf('%s - %s %02d', ferret(1:5), hemisphere, E.Channel(i)))
-    
+end 
+catch err
+    err
     keyboard
-
 end
+
 
 
 function S = load_file( tank_dir, block, file_stub)
@@ -255,17 +268,35 @@ end
 
 
 function plot_rate(x, spike_rate, ax, x_str)
-    
+%
+% INPUTS:
+%   - x: 1-by-n vector of values used for ordering trials (e.g. sound angle)
+%   - spike rate: 1-by-n vector of spike rates on individual trials in some
+%   time window determined earlier
+%   -ax: axis to plot data
+%   - x_str: parameter name
+%
+% Returns
+%   graphics objects to selected figure showing either a bar plot (<6
+%   parameter values) or line + error bars (>5 parameter values)
+
+% Get unique parameter values
 ux = unique(x);
 nX = numel(ux);
 [mx, sx] = deal( nan(nX, 1));
 
+% For each parameter
 for i = 1 : nX
 
    rate_i = spike_rate(x == ux(i));
 
+   % Bar plots if there are a small number of parameter values (indicative
+   % of categorical data - e.g. correct/error)
    if nX < 6
        barSE(ux(i), mean(rate_i), std(rate_i), ax, 'k');
+   
+   % Line with standard error if looking at many parameter values (e.g.
+   % continuous data)
    else
        mx(i) = mean(rate_i);
        sx(i) = std(rate_i) ./ sqrt(numel(rate_i)-1);
@@ -275,6 +306,33 @@ end
 if nX >= 6
     plotSE_patch(ux, mx, sx, ax, 'k');
 end
-    
+
+% Axis formatting
 xlabel(ax, x_str)
 ylabel(ax, 'Firing Rate (Hz)')
+
+
+function [imH, cbar] = plot_joint_rate(x, y, spike_rate, ax, x_str, y_str)
+    
+    [nX, uniqueX, ~] = nUnique(x);
+    [nY, uniqueY, ~] = nUnique(y);
+    z = nan(nY, nX);
+    
+    xy = [x, y];
+    uniqueXY = unique(xy, 'rows');
+    nXY = size(uniqueXY, 1);
+    
+    for i = 1 : nXY
+        
+        rows = ismember(xy, uniqueXY(i,:), 'rows');           
+        x_idx = uniqueX == uniqueXY(i,1);
+        y_idx = uniqueY == uniqueXY(i,2);        
+        z(y_idx, x_idx) = mean( spike_rate(rows));
+    end
+        
+    imH = imagesc(uniqueX, uniqueY, z, 'parent', ax);
+    cbar = colorbar;
+    
+    set(ax, 'xtick', [-1:1] * 180, 'ytick', [-1:1] * 180)
+    xlabel(x_str)
+    ylabel(y_str)
