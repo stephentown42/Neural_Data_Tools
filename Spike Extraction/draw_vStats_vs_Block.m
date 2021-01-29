@@ -1,7 +1,11 @@
 function draw_vStats_vs_Block
+%
+%
+% Stephen Town - 2020
+
 
 % Settings
-ferret = 'F1905_Sponge';
+ferret = 'F1701_Pendleton';
 hemisphere = 'R';
 
 % Load block table for cross referencing block dates
@@ -32,11 +36,7 @@ T_f.Size = repmat(60, size(T_f, 1), 1);
 % Concatenate
 % T = [T_f; T_b];
 
-
-% Set up figure and colormap
-figure('name', ferret)
-hold on
-
+% Set up colormap
 chans = unique(T_b.Chan);
 nChans = numel(chans);
 colors = nan( nChans, 3);
@@ -45,19 +45,63 @@ rng(1);
 for i = 1 : numel(chans)
     colors(i,:) = hsv2rgb([rand(1) 0.5 0.9]);
 end
-    
-% For each channel
+
+% Set up figure and colormap
+figure('name', ferret, 'position', [5 50 1850 900],'color','k')
+axs = dealSubplots(2,1);
+
+% Detect bad channels
+lamba_upper_lim = detect_bad_channels(T_b, chans, axs(1));
+
+% Show voltage stats
 plot_vStats( T_b, chans, colors, 'o')
 plot_vStats( T_f, chans, colors, 'd')
 
+set( plotXLine(lamba_upper_lim, axs(2)),'linestyle','--','color','r')
+
 xlabel('Date')
 ylabel('Std. Dev. (uV)')
+
+set(axs,'color',[0 0 0] + .149, 'nextplot', 'add','xcolor','w','ycolor','w')
+linkaxes(axs, 'x')
+
+
+
+function lamba_upper_lim = detect_bad_channels(T, chans, ax)
+
+[~, lamdaci] = poissfit( T.StdDev, 0.001);
+lamba_upper_lim = max(lamdaci);
+
+
+% Get bad sessions
+n_sessions = sum(T.Chan == 1);
+bad_sessions = nan( numel(chans), n_sessions);
+
+for i = 1 : numel(chans)
     
+    C = T( T.Chan == chans(i), :);
+    C = sortrows(C, 'BlockDatetime');
+    
+    bad_sessions(i,:) = C.StdDev > lamba_upper_lim;
+end
+
+% Plot
+[mx, my] = meshgrid( C.BlockDatetime, chans);
+mx = mx( bad_sessions == 1);
+my = my( bad_sessions == 1);
+
+scatter(mx, my, 'o', 'Filled', 'parent',ax)
+
+grid(ax,'on')
+set(ax,'ylim',[0 32] + .5,'MinorGridAlpha', 1,...
+    'XMinorGrid','on','YMinorGrid','on','MinorGridColor',[0 0 0]+0.6)
 
 
 
 
 function plot_vStats( T, chans, colors, m)
+
+h = nan(numel(chans), 1);
 
 for i = 1 : numel(chans) 
 
@@ -65,7 +109,12 @@ for i = 1 : numel(chans)
     
     scatter( C.BlockDatetime, C.StdDev, C.Size, colors(i,:), 'filled',...
         'DisplayName', num2str(chans(i)),'marker', m)    
+    
+    
+    h(i) = plot( C.BlockDatetime, C.StdDev, ':', 'color', colors(i,:));
 end
+
+uistack( h, 'bottom')
 
 
 function T = get_vStats_across_blocks( B, file_path, file_stub)
