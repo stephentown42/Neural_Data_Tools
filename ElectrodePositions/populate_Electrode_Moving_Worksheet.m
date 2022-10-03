@@ -1,44 +1,41 @@
-function populate_Electrode_Moving_Worksheet
+function populate_Electrode_Moving_Worksheet()
+% function populate_Electrode_Moving_Worksheet()
+%
+% Populates a template spreadsheet with target locations for next electrode
+% movements
+%
+% Args:
+%   None: The user will be presented with a series of dialog boxes to set the relevant parameters and file paths
+%
+% Returns:
+%   New .xlsx file with current and target electrode positions. File name contains array and current date (e.g. Electrode moving F1901_Left_2021_Mar_24.xlsx)
+%
+% Disclaimer:
+% -----------
+% The user is encouraged to double check at least some of the generated
+% values for security; no responsibility is accepted for incorrect
+% movements resulting from outputs generated.
+%
+% Version History
+% ---------------
+%   2016: Created by Stephen Town (ST)
+%   2018-Apr-22: Updated with new zero and comments (ST)
+%   2021-Nov-11: Updated to support broader use by others
+% 
 
-% 22 April 2018: Updated with new zero and comments (ST)
+% Steps requiring user interaction
+[current_zero, chans] = get_settings();
 
-% Options
-ferret  = 'F1701';  % F1808_Skittles | F1703 Grainger | F1701_Pendleton | F1810_Ursula
-array   = 'Left';   % Left | Right
-zeroPos = 25;    % Electrode zero position
-chans   = 0 : 31;   % Channels
+[EM, em_sheet] = get_electrode_moving_info();
 
-% Calculate static variables from options
-myDate   = datestr(now,'yyyy_mmm_dd');
-em_sheet = sprintf('%s_%s', ferret(1:5), array);
-
-% Define paths
-rootDir = Cloudstation('CoordinateFrames\Ephys\Electrode Moving');
-
-metaFile = 'Electrode moving.xlsx';
-refFile  = 'Electrode moving notesheet_32 Chan_autoTest.xlsx';
-
-% Copy target file as new version
-tarFile = strrep(refFile, 'autoTest', myDate);
-tarFile = strrep(tarFile, 'notesheet_32 Chan', em_sheet);
-tarPath = fullfile( rootDir, tarFile);
-srcPath = fullfile( rootDir, refFile);
-
-copyfile(srcPath, tarPath);
+tarPath = create_worksheet_from_template(em_sheet);
 
 % Write metadata
-xlswrite( tarPath, {em_sheet}, 'Sheet1','A1')     % Ferret name
+myDate = datestr(now,'yyyy_mmm_dd');
+xlswrite( tarPath, {em_sheet}, 'Sheet1','A1')                 % Ferret name
 xlswrite( tarPath, {strrep(myDate,'_',' / ')}, 'Sheet1','H1') % Current Date
-xlswrite( tarPath, {zeroPos}, 'Sheet1','B4')    % Zero position
+xlswrite( tarPath, {current_zero}, 'Sheet1','B4')    % Zero position
 
-% Load electrode moving
-EM = xls2struct(rootDir, metaFile, em_sheet);
-EM = struct2table(EM);
-EM = EM(~isnan(EM.Channel),:);
-
-% Preassign
-nRows = size(EM,1);
-Position = nan(nRows, 1);
 
 % Convert strings to nan
 if iscell(EM.Position(1))
@@ -47,24 +44,16 @@ if iscell(EM.Position(1))
     EM.Position = cell2mat(EM.Position);
 end
 
-% For each row
-for i = 1 : nRows  
-    
-    % Convert into datenumber (easier to manage)
-    myDateNum(i,1) = datenum(EM.Year(i), EM.Month(i), EM.Day(i));
-    
-    % Convert number format
-%     if ~ischar(EM.Position{i})
-        Position(i) = EM.Position(i);
-%         Position(i) = EM.Position{i};
-%     end
+% Convert into datenumber (easier to manage)
+myDateNum = nan(size(EM, 1), 1);
+
+for i = 1 : size(EM,1)    
+    myDateNum(i,1) = datenum(EM.Year(i), EM.Month(i), EM.Day(i));    
 end
 
 % Assign back to table
-EM.DateNum  = myDateNum;
-EM.Position = Position;
+EM.DateNum = myDateNum;
 
-clear myDateNum Position
 
 % Calculate depth relative to zero
 EM.Depth = EM.Position - EM.Zero;
@@ -87,7 +76,7 @@ for i = 1 : nChans
     
     % Note current position and date of last movement    
     if ~isempty(C)
-        currentPosition{i} = zeroPos + C.Depth(end);
+        currentPosition{i} = current_zero + C.Depth(end);
         currentDepth{i}    = C.Depth(end);    
         LastMoveDate{i}    = datestr(C.DateNum(end),'dd mmm');
     end
@@ -100,8 +89,92 @@ for i = 1 : nChans
     end
 end
 
-% Write to file
+% Write to worksheet
 xlswrite( tarPath, currentPosition, 'C4:C35')
 xlswrite( tarPath, Notes,           'E4:E35')
 xlswrite( tarPath, LastMoveDate,    'F4:F35')
 xlswrite( tarPath, currentDepth,    'G4:G35')
+
+end
+
+
+
+function [zeroPos, chans] = get_settings()
+% function [zeroPos, chans] = get_settings()
+%
+% Request confirmation of user settings for the array
+
+    % Create dialog box
+    prompt = {'Current zero (mm):','Number of channels in array:'};
+    dlgtitle = 'Settings';
+    dims = [1 35];
+    definput = {'24.9','31'};
+    answer = inputdlg(prompt,dlgtitle,dims,definput);
+
+    % Format variables for later use
+    zeroPos = str2double(answer{1});    % Electrode zero position
+    chans = 0 : str2double(answer{2});   % Channels
+end
+
+
+function [EM, selected_array] = get_electrode_moving_info()
+%function EM = get_electrode_moving_info()
+%
+% Load electrode moving
+
+    % Request file from user
+    [file_name, file_path] = uigetfile('*.xlsx','Please select electrode moving spreadsheet');
+    
+    ssds = spreadsheetDatastore( fullfile( file_path, file_name));
+    arrays = sheetnames(ssds, 1);
+    
+    % Request sheet from user
+    fig = uifigure('Position',[100 100 500 600],...
+        'Name','Select array you want and close this figure');
+    
+    uilistbox(fig,...
+        'Position',[125 20 200 550],...
+        'Items',arrays,... 
+        'ValueChangedFcn', @updateEditField); 
+
+    A = struct();
+    
+    % ValueChangedFcn callback
+    function updateEditField(src, ~)
+        A.selected_array = src.Value;
+    end
+
+    uiwait(fig)
+    fprintf('Selected: %s\n', A.selected_array)
+    selected_array = A.selected_array;
+
+    % Load data
+    EM = readtable( fullfile( file_path, file_name), 'Sheet', A.selected_array);
+    EM = EM(~isnan(EM.Channel),:);
+end
+
+
+function tar_path = create_worksheet_from_template(selected_array)
+%function tarPath =  create_worksheet_from_template()
+% 
+% Create a new worksheet based on a template design so that we can populate
+% it with metadata, current and future electrode positions. Created file is
+% saved in same director
+    
+    % Get location of template
+    [src_file, src_path] = uigetfile('*.xlsx','Please select template to populate');
+
+    % Suggest a name that might be more helpful for this array
+    suggested_name = strrep(src_file, 'template_worksheet', datestr(now,'yyyy_mmm_dd'));
+    suggested_name = strrep(suggested_name, '.xlsx', ['_' selected_array '.xlsx']);
+    
+    % Get user to specify save location
+    [tar_file, tar_path] = uiputfile('*.xlsx','Save new worksheet as', suggested_name);
+                    
+    % Copy file to chosen location
+    src_path = fullfile( src_path, src_file);
+    tar_path = fullfile( tar_path, tar_file);    
+    copyfile(src_path, tar_path);
+end
+
+
